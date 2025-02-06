@@ -75,16 +75,26 @@
             <div class="q-pt-lg row">
                 <div class="col-8">
                     <div style="position: relative;">
-                        <div class="absolute-top-left text-white q-pa-sm" style="background-color: #000000aa;">{{ ping }}fps</div>
-                        <canvas ref="rosCameraMain" style=" width: 100%; aspect-ratio: 4 / 3;" :style="status.value === 'finding_missed_tomato' ? 'cursor: pointer; border: 6px solid #0000FF': 'border: 3px solid #02542D;'" @click="videoClicked"></canvas>
+                        <!-- <canvas ref="rosCameraMain" style=" width: 100%; aspect-ratio: 4 / 3;" :style="status.value === 'finding_missed_tomato' ? 'cursor: pointer; border: 6px solid #0000FF': 'border: 3px solid #02542D;'" @click="videoClicked"></canvas> -->
+                        <video 
+                            ref="rosCameraMain" 
+                            autoplay playsinline muted 
+                            style=" width: 100%; aspect-ratio: 4 / 3; background-color: black;"
+                            :style="status.value === 'finding_missed_tomato' ? 'cursor: pointer; border: 6px solid #0000FF': 'border: 3px solid #02542D;'"
+                            @click="videoClicked"
+                        ></video>
                     </div>
                 </div>
                 <div class="col column">
                     <div style="position: relative;">
-                        <q-chip class="absolute-top-right q-ma-md" color="primary" text-color="white" icon="refresh" clickable
-                            @click="switchCam"
+                        <q-chip class="absolute-top-right q-ma-md" color="primary" text-color="white" icon="refresh" clickable=""
+                            @click="switchCam" style="z-index: 10;"
                         >화면 바꾸기</q-chip>
-                        <canvas ref="rosCameraSub" style="border: 3px solid #02542D; border-left: none; width: 100%; aspect-ratio: 4 / 3;"></canvas>
+                        <!-- <canvas ref="rosCameraSub" style="border: 3px solid #02542D; border-left: none; width: 100%; aspect-ratio: 4 / 3;"></canvas> -->
+                        <video ref="rosCameraSub" 
+                            autoplay playsinline muted 
+                            style="border: 3px solid #02542D; border-left: none; width: 100%; aspect-ratio: 4 / 3; background-color: black;"
+                        ></video>
                     </div>
                     <div class="text-center q-mt-xl">
 
@@ -209,7 +219,6 @@
 <script setup>
 
 import { ref, onMounted } from 'vue';
-import ROSLIB from 'roslib';
 import { useQuasar } from 'quasar'
 import { useRouter } from 'vue-router'
 
@@ -259,6 +268,11 @@ const status = ref(status_list.find((e) => e.value === 'pending'))
 const dialog = ref(null)
 
 function switchCam() {
+    let tmpSrcObject = null
+    tmpSrcObject = rosCameraMain.value.srcObject
+    rosCameraMain.value.srcObject = rosCameraSub.value.srcObject
+    rosCameraSub.value.srcObject = tmpSrcObject
+
     if (currentMain.value === 'cam1') {
         currentMain.value = 'cam2'
     } else {
@@ -278,10 +292,7 @@ const isCorrecting = ref(false)
 
 function emergency_stop() {
     if (status.value !== 'stop') {
-        if (status.value.value !== 'correcting') {
-            statusBuffer.value = status.value
-        }
-        dialog.value = null
+        statusBuffer.value = status.value
         status.value = status_list.find((e) => e.value === 'paused')
     }
 }
@@ -367,7 +378,6 @@ function clickRobotBtn(btn) {
         statusBuffer.value = status.value
         status.value = status_list.find((e) => e.value === 'correcting')
     } else if (btn === 'stop') {
-        statusBuffer.value = status.value
         dialog.value = 'stop'
     } else if (btn === 'finish') {
         dialog.value = 'finish'
@@ -379,52 +389,63 @@ function closeDialog() {
     status.value = statusBuffer.value;
 }
 
-
-function connect_ros() {
-    const ros = new ROSLIB.Ros({
-        url : 'ws://192.168.50.46:9090'
-    });
-
-    ros.on('connection', function() {
-        console.log('Connected to websocket server.');
-    });
-
-    ros.on('error', function(error) {
-        console.log('Error connecting to websocket server: ', error);
-    });
-
-    ros.on('close', function() {
-        console.log('Connection to websocket server closed.');
-    });
-
-    return ros
-}
-
-const ros = connect_ros()
-
-const ping = ref(0)
-
 const showQuitRobotDialog = ref(false)
 const quitRobotStatus = ref('ask')
-
-function disconnectROS() {
-    if (ros && ros.isConnected) {
-        console.log('Closing ROS connection...');
-        ros.close();
-    } else {
-        console.log('ROS is already disconnected.');
-    }
-}
 
 function quitRobot() {
     quitRobotStatus.value = 'quitting'
     setTimeout(() => {
         quitRobotStatus.value = 'quitted'
         setTimeout(() => {
-            disconnectROS()
             $router.push('/')
         }, 5000)
     }, 5000)
+}
+
+
+async function startStreaming() {
+    $q.loading.show()
+    const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("video", { direction: "recvonly" });
+
+    pc.ontrack = (event) => {
+        console.log("Track received:", event);
+        
+        const newStream = new MediaStream();
+        newStream.addTrack(event.track); // 현재 track 추가
+
+        if (!rosCameraMain.value.srcObject) {
+            rosCameraMain.value.srcObject = newStream;
+        } else {
+            rosCameraSub.value.srcObject = newStream;
+        }
+    };
+
+    rosCameraMain.value.onloadedmetadata = () => {
+        console.log("Video metadata loaded");
+    };
+
+    pc.oniceconnectionstatechange = () => {
+        console.log("ICE Connection State:", pc.iceConnectionState);
+    };
+
+    const offer = await pc.createOffer({
+        offerToReceiveVideo: true,
+    });
+    await pc.setLocalDescription(offer);
+
+    const response = await fetch("http://192.168.50.46:8080/offer", {
+        method: "POST",
+        body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
+        headers: { "Content-Type": "application/json" },
+    });
+
+    const answer = await response.json();
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
 }
 
 function videoClicked() {
@@ -439,72 +460,20 @@ function videoClicked() {
 }
 
 onMounted(() => {
-    let curtime = Date.now()
-    
-    status.value = status_list.find((e) => e.value === 'moving')
-    statusBuffer.value = status.value
+    startStreaming().then(() => {
+        status.value = status_list.find((e) => e.value === 'moving')
+        statusBuffer.value = status.value
 
-    setTimeout(() => {
-        status.value = status_list.find((e) => e.value === 'pending')
-    }, 5000)
+        setTimeout(() => {
+            status.value = status_list.find((e) => e.value === 'pending')
+        }, 5000)
 
-    // 특정 토픽 구독 예시
-    const cam1Listener = new ROSLIB.Topic({
-        ros : ros,
-        name : '/camera1/compressed_image',
-        messageType : 'sensor_msgs/CompressedImage',
-        throttle_rate: 100
+        $q.loading.hide()
+
     });
-
-    const cam2Listener = new ROSLIB.Topic({
-        ros : ros,
-        name : '/camera2/compressed_image',
-        messageType : 'sensor_msgs/CompressedImage',
-        throttle_rate: 100
-    });
-
-    async function drawImageToCanvas(canvasRef, data) {
-        const canvas = canvasRef.value;
-        if (canvas) {
-            const ctx = canvas.getContext('2d');
-
-            // 메시지 데이터 (base64로 변환 필요)
-            const img = new Image();
-            img.src = 'data:image/jpeg;base64,' + data;
-            console.log()
-
-            // 이미지를 캔버스에 그리기
-            img.onload = () => {
-                ctx.drawImage(img, 0, 0, 300, 150);
-            };
-        }
-    }
-
-    cam1Listener.subscribe(async function(message) {
-        ping.value = Date.now() - curtime 
-        curtime = Date.now()
-        if (currentMain.value === 'cam1') {
-            await drawImageToCanvas(rosCameraMain, message.data)
-        } else {
-            await drawImageToCanvas(rosCameraSub, message.data)
-        }
-    });
-
-    cam2Listener.subscribe(async function(message) {
-        if (currentMain.value === 'cam1') {
-            await drawImageToCanvas(rosCameraSub, message.data)
-        } else {
-            await drawImageToCanvas(rosCameraMain, message.data)
-        }
-    });
-    setInterval(() => {
-        if ((Date.now() - curtime > 500) & ros.isConnected) {
-            $q.loading.show()
-        } else {
-            $q.loading.hide()
-        }
-    }, 1000)
 })
+
+
 
 
 </script>

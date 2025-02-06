@@ -16,8 +16,16 @@
     <link rel="icon" type="image/ico" href="favicon.ico">
 
     <script src="https://cdn.jsdelivr.net/npm/roslib/build/roslib.min.js"></script>
+
   </head>
   <body>
     <!-- quasar:entry-point -->
   </body>
+  <script>
+    window.addEventListener('beforeunload', function(event) {
+      event.preventDefault();
+      event.returnValue = false;
+      console.log('Page refresh attempt detected');
+    });
+</script>
 </html>

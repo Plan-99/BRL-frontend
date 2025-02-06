@@ -4,7 +4,7 @@
       size="xl"
       color="primary"
       label="로봇 호출하기"
-      @click="$router.push('/main')"
+      @click="$router.push('/main2')"
     ></q-btn>
   </q-page>
 </template>
