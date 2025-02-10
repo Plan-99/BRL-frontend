@@ -291,9 +291,10 @@ const boolean_dialog_list = [
 const isCorrecting = ref(false)
 
 function emergency_stop() {
-    if (status.value !== 'stop') {
+    if (status.value.value !== 'paused') {
         statusBuffer.value = status.value
         status.value = status_list.find((e) => e.value === 'paused')
+        dialog.value = null
     }
 }
 
@@ -438,14 +439,24 @@ async function startStreaming() {
     });
     await pc.setLocalDescription(offer);
 
-    const response = await fetch("http://192.168.50.46:8080/offer", {
-        method: "POST",
-        body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
-        headers: { "Content-Type": "application/json" },
-    });
+    try {
+        const response = await fetch("http://192.168.50.46:8080/offer", {
+            method: "POST",
+            body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
+            headers: { "Content-Type": "application/json" },
+        });
+        const answer = await response?.json();
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    } catch {
+        // $q.dialog.show('카메라에 연결할 수 없습니다. 서버 상태를 확인해주세요.')
+        $q.dialog({
+            message: '카메라에 연결할 수 없습니다. 서버 상태를 확인해주세요.',
+            componentProps: {
+                persistent: true,
+            }
+        })
+    }
 
-    const answer = await response.json();
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
 }
 
 function videoClicked() {
